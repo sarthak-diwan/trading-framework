@@ -17,37 +17,50 @@ class APOSpreadStrategy(bt.Strategy):
         ('slow', 40),
         ('buy_threshold', -10),
         ('sell_threshold', 10),
-        ('paisa', 10000),
-        ('max_pos', 100),
+        ('min_price_move', 10),
+        ('min_profit_to_close', 10),
     )
     
     def __init__(self):
         # Calculate hedging ratio
         self.hedge_ratio = compute_hedge_ratio(list(self.datas[0].close), list(self.datas[1].close))
- 
+        
         # Create the spread series
         self.spread = self.datas[0].close - self.hedge_ratio * self.datas[1].close
         
         self.fast_ema = bt.indicators.EMA(self.spread, period=self.params.fast)
         self.slow_ema = bt.indicators.EMA(self.spread, period=self.params.slow)
         self.apo_spread = self.fast_ema - self.slow_ema
-        self.our_pos = 0
-
         
+        self.last_buy_price = 0
+        self.last_sell_price = 0
+
     def next(self):
-        stock1 = self.datas[0].close[0]
-        stock2 = self.datas[1].close[0]
-        x = self.p.paisa/(stock1 + self.hedge_ratio*stock2)
-        if self.apo_spread[0] < self.params.buy_threshold and self.our_pos < self.p.max_pos:
-            self.our_pos += 1
-            self.buy(data=self.datas[0], size=x)   # Buy 1 share of stock 1
-            self.sell(data=self.datas[1], size=x*self.hedge_ratio)  # Short hedge_ratio shares of stock 2
+        # Calculate the PnL for the current position
+        current_pnl = self.broker.getvalue() - self.broker.get_cash()
 
-        elif self.apo_spread[0] > self.params.sell_threshold and self.our_pos > -self.p.max_pos:
-            self.our_pos -= 1
-            self.sell(data=self.datas[0], size=x)  # Short 1 share of stock 1
-            self.buy(data=self.datas[1], size=x*self.hedge_ratio)   # Buy hedge_ratio shares of stock 2
+        if ((self.apo_spread[0] > self.params.sell_threshold and abs(self.datas[0].close[0] - self.last_sell_price) > self.params.min_price_move) 
+            or (self.position.size > 0 and (self.apo_spread[0] >= 0 or current_pnl > self.params.min_profit_to_close))):
+            
+            self.close(data=self.datas[0])  # Close position in stock 1
+            self.close(data=self.datas[1])  # Close position in stock 2
+            self.last_sell_price = self.datas[0].close[0]
 
+        elif ((self.apo_spread[0] < self.params.buy_threshold and abs(self.datas[0].close[0] - self.last_buy_price) > self.params.min_price_move) 
+            or (self.position.size < 0 and (self.apo_spread[0] <= 0 or current_pnl > self.params.min_profit_to_close))):
+            
+            self.close(data=self.datas[0])  # Close position in stock 1
+            self.close(data=self.datas[1])  # Close position in stock 2
+            self.last_buy_price = self.datas[0].close[0]
+    
+        # Entry logic remains the same as before
+        elif not self.position:
+            if self.apo_spread[0] < self.params.buy_threshold:
+                self.buy(data=self.datas[0], size=10)   # Buy 1 share of stock 1
+                self.sell(data=self.datas[1], size=10*self.hedge_ratio)  # Short hedge_ratio shares of stock 2
+            elif self.apo_spread[0] > self.params.sell_threshold:
+                self.sell(data=self.datas[0], size=10)  # Short 1 share of stock 1
+                self.buy(data=self.datas[1], size=10*self.hedge_ratio)   # Buy hedge_ratio shares of stock 2
 
 if __name__ == "__main__":
     data = pd.read_csv('./data/cleaned_stocks.csv')
@@ -57,7 +70,7 @@ if __name__ == "__main__":
     data_train, data_test = train_test_split(data)
     data=data_train
     pdf = pca(data, 3)
-    f = open('results.txt', 'w')
+
     dc, nc = optics(pdf)
     for cluster in nc[1:]:
         cp = cluster_pairs(cluster, dc, data)
@@ -71,15 +84,11 @@ if __name__ == "__main__":
             #     continue
             stock1 = cp['pair1'][i].split('_')[0]
             stock2 = cp['pair2'][i].split('_')[0]
-            # if(stock1 != "GESHIP" or stock2 != "SOMANYCERA"):
-            #     continue
             xt = BackTest()
             xt.set_cash(100000)
             xt.add_symbols([stock1, stock2])
             xt.add_strategy(APOSpreadStrategy)
-            results = xt.run()
-            for result in results:
-                f.write(f"{stock1},{stock2},{result.analyzers.sharpe.get_analysis()['sharperatio']},{result.analyzers.drawdown.get_analysis()['drawdown']},{result.analyzers.returns.get_analysis()['rnorm100']}\n")
+            xt.run()
             # xt.plot()
             print(f"Final Portfolio Value: {xt.get_value()}")
         print(cp)

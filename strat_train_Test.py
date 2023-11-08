@@ -54,33 +54,36 @@ if __name__ == "__main__":
     data.set_index('Date', inplace=True)
     data.index = pd.to_datetime(data.index)
 
-    data_train, data_test = train_test_split(data)
+    data_train, data_test = train_test_split(data, train_size=0.8)
     data=data_train
     pdf = pca(data, 3)
-    f = open('results.txt', 'w')
+    f = open('results_train.txt', 'w')
     dc, nc = optics(pdf)
     for cluster in nc[1:]:
-        cp = cluster_pairs(cluster, dc, data)
-        if cp is None:
-            continue
-        print(cp['pair1'][0])
-        # cp['pairs']
-        n = len(cp)
-        for i in range(n):
-            # if cp['Cross'][i] < 25:
-            #     continue
-            stock1 = cp['pair1'][i].split('_')[0]
-            stock2 = cp['pair2'][i].split('_')[0]
-            # if(stock1 != "GESHIP" or stock2 != "SOMANYCERA"):
-            #     continue
-            xt = BackTest()
-            xt.set_cash(100000)
-            xt.add_symbols([stock1, stock2])
-            xt.add_strategy(APOSpreadStrategy)
-            results = xt.run()
-            for result in results:
-                f.write(f"{stock1},{stock2},{result.analyzers.sharpe.get_analysis()['sharperatio']},{result.analyzers.drawdown.get_analysis()['drawdown']},{result.analyzers.returns.get_analysis()['rnorm100']}\n")
-            # xt.plot()
-            print(f"Final Portfolio Value: {xt.get_value()}")
-        print(cp)
+        try:
+            cp = cluster_pairs(cluster, dc, data)
+            if cp is None:
+                continue
+            print(cp['pair1'][0])
+            # cp['pairs']
+            n = len(cp)
+            for i in range(n):
+                # if cp['Cross'][i] < 25:
+                #     continue
+                stock1 = cp['pair1'][i].split('_')[0]
+                stock2 = cp['pair2'][i].split('_')[0]
+                # if(stock1 != "GESHIP" or stock2 != "SOMANYCERA"):
+                #     continue
+                xt = BackTest()
+                xt.set_cash(100000)
+                xt.add_symbols([stock1, stock2], test_train_split=True, train=True)
+                xt.add_strategy(APOSpreadStrategy)
+                results = xt.run()
+                for result in results:
+                    f.write(f"{stock1},{stock2},{result.analyzers.sharpe.get_analysis()['sharperatio']},{result.analyzers.drawdown.get_analysis()['drawdown']},{result.analyzers.returns.get_analysis()['rnorm100']},{result.hedge_ratio},{cp['Cointegration'][i]},{cp['Mean revertion'][i]},{cp['Half-life'][i]},{cp['Cross'][i]}\n")
+                # xt.plot()
+                print(f"Final Portfolio Value: {xt.get_value()}")
+            print(cp)
+        except Exception as e:
+            print(e)
     print(dc)

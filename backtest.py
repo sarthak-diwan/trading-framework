@@ -5,6 +5,7 @@ import os.path
 import sys
 import json
 from colorama import Fore, Back, Style
+from common_utils import *
 
 class Strategy(bt.Strategy):
     # self.datas[0] is the default data for trading operations and to keep all strategy elements synchronized
@@ -66,7 +67,36 @@ class BackTest:
     
     def set_cash(self, cash):
         self.cerebro.broker.setcash(cash)
-
+    def add_symbols(self, symbols, common=True, test_train_split=False, train=False):
+        dfs = []
+        for symbol in symbols:
+            path = os.path.join(self.data_dir, symbol + ".json")
+            with open(path) as f:
+                data = json.load(f)
+            df = pd.DataFrame({
+                'datetime': data['t'],
+                'open': data['o'],
+                'high': data['h'],
+                'low': data['l'],
+                'close': data['c'],
+                'volume': data['v']
+            })
+            df.set_index('datetime', inplace=True)
+            df.index = pd.to_datetime(df.index, unit='s')
+            dfs.append(df)
+        if common:
+            dfs = get_common_data(dfs)
+        for df in dfs:
+            if(test_train_split):
+                df_train, df_test = train_test_split(df)
+                if(train):
+                    data = bt.feeds.PandasData(dataname=df_train)
+                else:
+                    data = bt.feeds.PandasData(dataname=df_test)
+            else:
+                data = bt.feeds.PandasData(dataname=df)
+            self.cerebro.adddata(data)
+        
     def add_symbol(self, symbol):
         path = os.path.join(self.data_dir, symbol + ".json")
         with open(path) as f:
@@ -96,7 +126,8 @@ class BackTest:
             print(f"Sharpe Ratio: {result.analyzers.sharpe.get_analysis()['sharperatio']}")
             print(f"Drawdown: {result.analyzers.drawdown.get_analysis()['drawdown']}")
             print(f"Returns: {result.analyzers.returns.get_analysis()['rnorm100']}")
-
+        return results
+    
     def get_value(self):
         return self.cerebro.broker.getvalue()
     
